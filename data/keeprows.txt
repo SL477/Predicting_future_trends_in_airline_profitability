@@ -1,0 +1,16 @@
+AirTran
+Alaska
+Allegiant
+America West
+American
+Continental
+Delta
+Frontier
+Hawaiian
+Northwest
+Southwest
+Spirit
+US Airways
+United
+Virgin America
+jetBlue

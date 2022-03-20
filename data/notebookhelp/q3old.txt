@@ -1,0 +1,101 @@
+def getDataForStatsModel():
+    """Get the training and test dataframes for predicting the profit from the fuel expenses
+    
+    Returns:
+    X_train, X_test : pandas dataframes"""
+    X = df.copy()
+    X = X[['Total Price per Gallon of Fuel $US Dollars', 'System Total Operating Revenue $billions', 'System Total Operating Expenses $ Billions','Total Gallons of Fuel Millions', 'Airline','Year']]
+
+    # Remove na target columns
+    X = X[(X['System Total Operating Revenue $billions'].isnull() == False) & (X['System Total Operating Expenses $ Billions'].isnull() == False)]
+
+    # Derived feature
+    X['profit'] = X['System Total Operating Revenue $billions'] - X['System Total Operating Expenses $ Billions']
+    
+    # Drop unneeded columns
+    X.drop('System Total Operating Revenue $billions', axis=1, inplace=True)
+    X.drop('System Total Operating Expenses $ Billions', axis=1, inplace=True)
+    
+    # Run get dummies to encode the airline
+    # Using https://stackoverflow.com/questions/44721565/pandas-merge-rows-and-add-columns-with-get-dummies
+    X = pd.concat([X, pd.get_dummies(X['Airline'])], axis=1)
+    X.drop('Airline', axis=1, inplace=True)
+    
+    # Impute mean values
+    for col in ['Total Price per Gallon of Fuel $US Dollars', 'Total Gallons of Fuel Millions']:
+        m = X[col].mean()
+        X[col] = X[col].fillna(m)
+
+    # Rename columns
+    X.rename(columns={
+        'Total Price per Gallon of Fuel $US Dollars': 'fuelPrice',
+        'Total Gallons of Fuel Millions': 'amtFuel',
+        'America West': 'AmericaWest',
+        'US Airways': 'USAirways',
+        'Virgin America': 'VirginAmerica'
+    }, inplace=True)
+    # looked at https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.rename.html for this
+    
+    # Split into training and test sets
+    X_train, X_test = train_test_split(X, test_size=0.3, random_state=42)
+    
+    return X_train, X_test
+
+X_train, X_test = getDataForStatsModel()
+# https://www.statsmodels.org/dev/example_formulas.html
+mod = smf.ols(formula='profit ~ fuelPrice + amtFuel + amtFuel * fuelPrice + Year + AirTran + Alaska + Allegiant + AmericaWest + American + Continental + Delta + Frontier + Hawaiian + Northwest + Southwest + Spirit + USAirways + United + VirginAmerica + jetBlue', data=X_train).fit()
+
+print(mod.summary())
+#print(mod.params)
+
+def predictFromStatsModelParams(params:pd.Series, test_df:pd.DataFrame)->pd.DataFrame:
+    """Predict the data from the stats model and return the predictions
+    
+    Using 'dynamic' programming to write some of the code:
+    ret = ""
+    for i in 'Year + AirTran + Alaska + Allegiant + AmericaWest + American + Continental + Delta + Frontier + Hawaiian + Northwest + Southwest + Spirit + USAirways + United + VirginAmerica + jetBlue'.split(' + '):
+       ret += " + x['" + i +  "'] * mod.params['" + i + "']"
+    ret
+    """
+    # Get the coefficients
+    fp = mod.params['fuelPrice']
+    i = mod.params['Intercept']
+    af = mod.params['amtFuel']
+    interaction = mod.params['amtFuel:fuelPrice']
+    
+    # prediction
+    test_df['pred'] = test_df.apply(lambda x: x['fuelPrice'] * fp + x['amtFuel'] * af + \
+                                   x['fuelPrice'] * x['amtFuel'] * interaction + i  + x['Year'] * mod.params['Year'] \
+                                    + x['AirTran'] * mod.params['AirTran'] + x['Alaska'] * mod.params['Alaska'] \
+                                    + x['Allegiant'] * mod.params['Allegiant'] + x['AmericaWest'] * mod.params['AmericaWest'] \
+                                    + x['American'] * mod.params['American'] + x['Continental'] * mod.params['Continental'] \
+                                    + x['Delta'] * mod.params['Delta'] + x['Frontier'] * mod.params['Frontier'] \
+                                    + x['Hawaiian'] * mod.params['Hawaiian'] + x['Northwest'] * mod.params['Northwest'] \
+                                    + x['Southwest'] * mod.params['Southwest'] + x['Spirit'] * mod.params['Spirit'] \
+                                    + x['USAirways'] * mod.params['USAirways'] + x['United'] * mod.params['United'] \
+                                    + x['VirginAmerica'] * mod.params['VirginAmerica'] + x['jetBlue'] * mod.params['jetBlue'], axis=1)
+    
+    # residual
+    test_df['residual'] = test_df['profit'] - test_df['pred']
+    return test_df
+
+predictFromStatsModelParams(mod, X_test)
+
+print('RMSE', mean_squared_error(X_test['profit'], X_test['pred'], squared=False)) # https://scikit-learn.org/stable/modules/generated/sklearn.metrics.mean_squared_error.html
+
+plt.hist(X_test['residual'])
+plt.title('Histograms of residuals')
+plt.xlabel('Error Bins')
+plt.ylabel('Count')
+plt.show()
+
+plt.scatter(X_test['profit'], X_test['pred'])
+minx, maxx = min(X_test['profit']), max(X_test['profit'])
+plt.plot([minx,maxx],[minx,maxx])
+plt.title("True against predicted")
+plt.xlabel("True")
+plt.ylabel("Predicted")
+plt.show()
+
+# Delete variables
+del minx, maxx
